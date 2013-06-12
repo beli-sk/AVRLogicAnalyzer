@@ -42,7 +42,7 @@ uint8_t inputs_cur[INPUT_NUM];
 uint8_t inputs_last[INPUT_NUM];
 uint8_t inputs_start[INPUT_NUM];
 
-uint8_t state = 0; // 0 = before, 1 = running, 2 = after
+uint8_t state = 0; // 0 = waiting, 1 = running, 2 = send data, 3 = stop
 
 #define SAMPLE_INPUT(arg) (INPUT_PIN & _BV(inputs[arg]) ? 1 : 0)
 
@@ -77,14 +77,14 @@ void start(void) {
 }
 
 uint8_t sample_inputs(void) {
-	uint8_t tmp;
+	uint8_t val;
 	for(uint8_t i = 0; i < INPUT_NUM; ++i) {
-		tmp = SAMPLE_INPUT(i);
-		if( tmp != inputs_last[i] ) {
+		val = SAMPLE_INPUT(i);
+		if( val != inputs_last[i] ) {
 			tm_last = ((uint32_t)tmx << 16) | tm;
 			inputs_last[i] = inputs_cur[i];
-			inputs_cur[i] = tmp;
-			return i | (tmp << 3);
+			inputs_cur[i] = val;
+			return i | (val << 3);
 		}
 	}
 	return 0xff; // no change
@@ -112,6 +112,26 @@ uint8_t write_event(uint8_t inchange) {
 	return 1;
 }
 
+void send_data(void) {
+	uint16_t dptr2 = 0;
+	uint8_t tmp, inp, val, tmlen;
+	uint32_t tm;
+
+	printf("begin\n");
+	while( dptr2 < dptr ) {
+		tmp = data[dptr2++];
+		tmlen = tmp >> 4;
+		val = (tm >> 3) & 1;
+		inp = tm & 0x07;
+		tm = 0;
+		for( uint8_t i = 0; i < tmlen; ++i ) {
+			tm |= ((uint32_t)data[dptr2++]) << (i * 8);
+		}
+		printf("%d: %d [%d]\n", tm, inp, val);
+	}
+	printf("end\n");
+}
+
 int main(void) {
 	uint8_t tmp;
 
@@ -130,6 +150,7 @@ int main(void) {
 	initialize();
 	while(1) {
 		if( state == 0 || state == 1 ) {
+			// waiting for trigger or running
 			if( (tmp = sample_inputs()) != 0xff ) {
 				// input changed
 				if( state == 0 ) {
@@ -137,6 +158,10 @@ int main(void) {
 				}
 				write_event(tmp);
 			}
+		} else if( state == 2 ) {
+			// finished running, send data
+			send_data();
+			state = 3; // stop
 		}
 		LED_ON;
 	}
